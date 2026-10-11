@@ -1,0 +1,33 @@
+#!/bin/sh
+# RK3399 transcode CPU boost helper (runs as root via sudo).
+# Called by the jellyfin-ffmpeg wrapper each time a transcode starts.
+# Sets CPU governors to performance while ANY jellyfin-ffmpeg transcode is
+# running, then restores whatever was set before. Concurrent calls collapse
+# into one watcher via a lock dir in /run.
+P0=/sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+P4=/sys/devices/system/cpu/cpufreq/policy4/scaling_governor
+LOCK=/run/rk3399-cpu-boost.lock
+
+mkdir "$LOCK" 2>/dev/null || exit 0    # another watcher is already active
+
+# save current governors once, for restore
+cat "$P0" > "$LOCK/p0" 2>/dev/null
+cat "$P4" > "$LOCK/p4" 2>/dev/null
+
+echo performance > "$P0" 2>/dev/null
+echo performance > "$P4" 2>/dev/null
+
+# wait until no jellyfin-ffmpeg transcode process remains
+while pgrep -f "jellyfin-ffmpeg/ffmpeg.bin" >/dev/null 2>&1; do
+  sleep 2
+done
+# grace period: a new session may start right after the previous one ends
+sleep 5
+if pgrep -f "jellyfin-ffmpeg/ffmpeg.bin" >/dev/null 2>&1; then
+  rm -rf "$LOCK"
+  exit 0    # new transcode running; its watcher will do the restore
+fi
+
+cat "$LOCK/p0" > "$P0" 2>/dev/null
+cat "$LOCK/p4" > "$P4" 2>/dev/null
+rm -rf "$LOCK"

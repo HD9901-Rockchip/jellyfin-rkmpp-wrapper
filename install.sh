@@ -43,6 +43,19 @@ else
   echo "         put librga.so.2.1.0.rga-split next to install.sh and re-run." >&2
 fi
 
+# 3b. CPU boost helper: raise governors to performance while a transcode is
+#     running, restore afterwards (idle behaviour untouched).
+BOOST_SRC="$SCRIPT_DIR/rk3399-cpu-boost"
+if [ -f "$BOOST_SRC" ]; then
+  install -m 755 "$BOOST_SRC" /usr/local/bin/rk3399-cpu-boost
+  printf 'jellyfin ALL=(root) NOPASSWD: /usr/local/bin/rk3399-cpu-boost\n' \
+    > /etc/sudoers.d/jellyfin-cpu-boost
+  chmod 440 /etc/sudoers.d/jellyfin-cpu-boost
+  echo "==> cpu boost helper installed (governors: performance during transcode only)"
+else
+  echo "==> (rk3399-cpu-boost not found next to install.sh; skipped)"
+fi
+
 # 4. Optional: CJK fallback font for libass subtitle rendering.
 #    Without it, burned-in Chinese subtitles render as tofu boxes.
 FONT_SRC="$SCRIPT_DIR/DroidSansFallbackFull.ttf"

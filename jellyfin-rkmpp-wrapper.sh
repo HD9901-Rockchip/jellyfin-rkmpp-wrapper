@@ -40,6 +40,10 @@ REAL=/usr/lib/jellyfin-ffmpeg/ffmpeg.bin
 args=()
 skip=0
 
+# Boost CPU governors to performance for the duration of the transcode.
+# Needs the sudoers rule (see install.sh); silently does nothing otherwise.
+sudo -n /usr/local/bin/rk3399-cpu-boost >/dev/null 2>&1 &
+
 for a in "$@"; do
   if [ "$skip" = "1" ]; then skip=0; continue; fi
   if [ "$a" = "-afbc" ]; then skip=1; continue; fi
