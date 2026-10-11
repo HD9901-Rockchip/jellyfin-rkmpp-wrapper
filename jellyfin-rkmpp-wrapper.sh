@@ -24,6 +24,17 @@
 #
 #   NOTE: this wrapper REQUIRES the patched librga. Without it the burned-in
 #   subtitles come out green/corrupted again.
+#
+# Fix 3) Cap 4K transcodes at 1080p:
+#   RK3399's encoder (VEPu2) is a 1080p-class block: encoding 3840x2160 H264
+#   runs at ~5 fps (0.2x realtime), so any "4K quality" transcode just stalls
+#   the client in an endless buffer/restart loop. 1080p output runs at ~38 fps
+#   (1.5x realtime) from a 4K source. Clients that ask for a 4K transcode get
+#   1080p instead; Direct-Play and remux sessions never reach this wrapper
+#   path and are untouched. Two graph shapes are handled:
+#     a) simple:  -vf "...vpp_rkrga=w=3840:h=2160:format=nv12..." -> 1920x1080
+#     b) overlay: sub canvas "vpp_rkrga=w=3840:h=2160:format=bgra" -> 1080p,
+#        and a 1080p scale is inserted on [main] before the overlay.
 
 REAL=/usr/lib/jellyfin-ffmpeg/ffmpeg.bin
 args=()
@@ -35,6 +46,18 @@ for a in "$@"; do
   case "$a" in
     *overlay_rkrga*)
       a=$(printf '%s' "$a" | sed -E 's/(overlay_rkrga=[^;]*):afbc=[0-9]+/\1/g')
+      case "$a" in
+        *w=3840*)
+          a=$(printf '%s' "$a" | sed -E '
+            s/vpp_rkrga=w=3840:h=2160:format=bgra/vpp_rkrga=w=1920:h=1080:format=bgra/g;
+            s/(\[0:0\][^;]*)\[main\]/\1,vpp_rkrga=w=1920:h=1080:format=nv12:afbc=0[main]/g;
+            s/hwupload=derive_device=rkmpp,vpp_rkrga=w=1920:h=1080:format=bgra:afbc=1\[sub\]/hwupload=derive_device=rkmpp[sub]/g
+          ')
+          ;;
+      esac
+      ;;
+    *vpp_rkrga=w=3840*)
+      a=$(printf '%s' "$a" | sed -E 's/vpp_rkrga=w=3840:h=2160/vpp_rkrga=w=1920:h=1080/g')
       ;;
   esac
   args+=("$a")

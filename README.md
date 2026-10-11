@@ -18,15 +18,19 @@ librga 补丁在 `RkRgaBlit` 里拦下"YUV 主画面 + RGB 图层 → YUV 输出
 
 两趟的色彩矩阵用 BT.601 一对（实测往返 53.5 dB，基本无损；BT.709 的两向矩阵在这批硬件上不是严格互逆，往返只有 32 dB）。暂存缓冲按需从 dma-heap 分配并按尺寸缓存复用。Jellyfin 的 ffmpeg 动态链接 `librga.so.2`，换掉这个 .so 就生效，不用重编 ffmpeg。
 
-wrapper v2 做的事就简单了：剥掉 `-afbc <val>` 全局参数，再把 `overlay_rkrga` 滤镜参数里的 `:afbc=N` 去掉（RGA2 既吃不了也吐不出 AFBC），滤镜图原样透传——字幕烧录完整留在 RGA 硬件上，零 CPU 开销。
+wrapper v2/v3 做的事：剥掉 `-afbc <val>` 全局参数，把 `overlay_rkrga` 滤镜参数里的 `:afbc=N` 去掉（RGA2 既吃不了也吐不出 AFBC）；v3 再把 4K 转码请求封顶到 1080p（见下）。滤镜图其余部分原样透传——字幕烧录完整留在 RGA 硬件上，零 CPU 开销。
 
 ```
-Jellyfin → ffmpeg(= wrapper 脚本) → 剥 afbc 参数 → ffmpeg.bin(真二进制)
+Jellyfin → ffmpeg(= wrapper 脚本) → 剥 afbc / 封顶 4K → ffmpeg.bin(真二进制)
                                         ↓
                             librga(补丁版) 拆两趟硬件混合
 ```
 
-注意：**wrapper v2 必须搭配补丁版 librga 使用**。只装 wrapper 不换 librga，绿屏会原样回来。
+**wrapper v3 的 4K 封顶**：RK3399 的编码器（VEPu2）是 1080p 级的，编 3840x2160 H264 只有约 5 fps（0.2 倍实时），4K 档的转码请求必然卡死在无限缓冲。封顶到 1080p 后实测 1.1 倍实时（4K HEVC Main10 源 + 字幕烧录）。封顶逻辑：`vpp_rkrga=w=3840:h=2160` → `1920x1080`，overlay 链路在主画面分支插入 1080p 缩放，并把字幕画布的恒等缩放删掉。直接播放（Direct-Play）和 remux 会话不经过这条路径，不受影响。
+
+注意：**wrapper 必须搭配补丁版 librga 使用**。只装 wrapper 不换 librga，绿屏会原样回来。
+
+另：板上有一个 `cpu-performance.service`（开机把 CPU 调速器设为 performance）。没有它，schedutil 爬坡太慢，4K→1080p+字幕链路只有约 0.8 倍实时，会周期性卡顿；设成 performance 后 1.1 倍实时。不想要的话 `sudo systemctl disable --now cpu-performance.service` 即可恢复默认。
 
 ## 安装
 
