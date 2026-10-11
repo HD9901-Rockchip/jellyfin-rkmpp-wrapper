@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the Jellyfin rkmpp wrapper for RK3399.
+# Install the Jellyfin rkmpp wrapper + patched librga for RK3399.
 # Must run as root on the target board (Armbian/Debian with jellyfin-ffmpeg).
 set -e
 
@@ -24,11 +24,26 @@ else
   echo "==> $FFDIR/ffmpeg.bin already exists, keeping it"
 fi
 
-# 2. Install the wrapper in place of the real binary
+# 2. Install the wrapper (v2: hardware overlay_rkrga, strips afbc only)
 install -m 755 "$SCRIPT_DIR/jellyfin-rkmpp-wrapper.sh" "$FFDIR/ffmpeg"
 echo "==> wrapper installed as $FFDIR/ffmpeg"
 
-# 3. Optional: CJK fallback font for libass subtitle rendering.
+# 3. Patched librga ("rga split overlay" two-pass hardware blending).
+#    Without it, burned-in subtitles come out green/corrupted again.
+LIB_SRC="$SCRIPT_DIR/librga.so.2.1.0.rga-split"
+if [ -f "$LIB_SRC" ]; then
+  if [ ! -f "$FFDIR/lib/librga.so.2.1.0.orig" ]; then
+    cp -a "$FFDIR/lib/librga.so.2.1.0" "$FFDIR/lib/librga.so.2.1.0.orig"
+    echo "==> original librga backed up as librga.so.2.1.0.orig"
+  fi
+  install -m 644 "$LIB_SRC" "$FFDIR/lib/librga.so.2.1.0"
+  echo "==> patched librga installed"
+else
+  echo "WARNING: $LIB_SRC not found - subtitles will burn in GREEN!" >&2
+  echo "         put librga.so.2.1.0.rga-split next to install.sh and re-run." >&2
+fi
+
+# 4. Optional: CJK fallback font for libass subtitle rendering.
 #    Without it, burned-in Chinese subtitles render as tofu boxes.
 FONT_SRC="$SCRIPT_DIR/DroidSansFallbackFull.ttf"
 if [ -f "$FONT_SRC" ]; then
@@ -41,6 +56,6 @@ else
   echo "    Chinese subtitles will render as boxes if the system has no CJK font."
 fi
 
-# 4. Restart Jellyfin so future transcodes pick up the wrapper
+# 5. Restart Jellyfin so future transcodes pick up the wrapper
 systemctl restart jellyfin 2>/dev/null || true
 echo "==> done. Jellyfin restarted."
