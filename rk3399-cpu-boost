@@ -2,11 +2,24 @@
 # RK3399 transcode CPU boost helper (runs as root via sudo).
 # Called by the jellyfin-ffmpeg wrapper each time a transcode starts.
 # Sets CPU governors to performance while ANY jellyfin-ffmpeg transcode is
-# running, then restores whatever was set before. Concurrent calls collapse
-# into one watcher via a lock dir in /run.
+# running, then restores whatever was set before. Detached with setsid so a
+# process-group kill aimed at the transcode cannot take the watcher down
+# (a dead watcher would leak the lock and leave governors stuck).
 P0=/sys/devices/system/cpu/cpufreq/policy0/scaling_governor
 P4=/sys/devices/system/cpu/cpufreq/policy4/scaling_governor
 LOCK=/run/rk3399-cpu-boost.lock
+
+if [ "$1" != "--daemon" ]; then
+  setsid "$0" --daemon </dev/null >/dev/null 2>&1 &
+  exit 0
+fi
+
+# stale-lock takeover: a previous watcher died without cleanup
+if [ -d "$LOCK" ] && ! pgrep -f "rk3399-cpu-boost --daemon" >/dev/null 2>&1; then
+  cat "$LOCK/p0" > "$P0" 2>/dev/null
+  cat "$LOCK/p4" > "$P4" 2>/dev/null
+  rm -rf "$LOCK"
+fi
 
 mkdir "$LOCK" 2>/dev/null || exit 0    # another watcher is already active
 
